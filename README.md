@@ -19,16 +19,68 @@ and recruiters can actually review.
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌──────────────────────────┐
-│  Ingestion  │────▶│ Vector Store │────▶│ Retriever Strategies     │
-│ load/chunk  │     │ FAISS/Chroma │     │ vector · multi · self ·  │
-└─────────────┘     └──────────────┘     │ parent-document          │
-                                         └────────────┬─────────────┘
-                                                      ▼
-                                         ┌──────────────────────────┐
-                                         │ RAG generation + metrics │
-                                         │ CLI · Gradio · Docker    │
-                                         └──────────────────────────┘
+                         ┌─────────────────────────────────────┐
+                         │           Query / Operator          │
+                         │   CLI · Gradio UI · Docker service  │
+                         └──────────────────┬──────────────────┘
+                                            │
+                                            ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              RAGEngine façade                                │
+│                     ingest → index → retrieve → generate                     │
+└───────────────┬───────────────────────────────────────────────┬──────────────┘
+                │                                               │
+                ▼                                               ▼
+┌───────────────────────────────┐               ┌──────────────────────────────┐
+│         Ingestion             │               │     Vector Store Backends    │
+│  load (.txt/.md/.pdf)         │──────────────▶│                              │
+│  normalize metadata           │               │  ┌────────┐    ┌──────────┐  │
+│  (source, category, year,     │               │  │ FAISS  │    │  Chroma  │  │
+│   title, doc_id)              │               │  │ flat   │    │  flat    │  │
+│  flat chunking                │               │  │ parent │    │  parent  │  │
+│  parent/child hierarchy       │               │  └────────┘    └──────────┘  │
+└───────────────────────────────┘               └───────────────┬──────────────┘
+                                                                │
+                                                                ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         Retriever Strategies (pluggable)                     │
+│                                                                              │
+│  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────────────┐  │
+│  │   vector_store     │  │    multi_query     │  │      self_query       │  │
+│  │  dense similarity  │  │  LLM rewrites Q →  │  │  LLM → semantic query │  │
+│  │  top-k over chunks │  │  Q1..Qn, union hits│  │  + metadata filters   │  │
+│  │  baseline / fast   │  │  ambiguous Qs      │  │  (category, year, …)  │  │
+│  └────────────────────┘  └────────────────────┘  └────────────────────────┘  │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │                        parent_document                                 │  │
+│  │   match small child chunks  →  return larger parent context            │  │
+│  │   best for long manuals / policies where local match needs surround    │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────┬───────────────────────────────────────┘
+                                       │ RetrievedChunk[]
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         Grounded Generation                                  │
+│   context formatting + citations [source:N]  →  ChatOpenAI (retry/backoff)   │
+│   refusal when context insufficient                                          │
+└──────────────────────────────────────┬───────────────────────────────────────┘
+                                       │ RAGAnswer
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    Evaluation / Metrics (RetrieverBenchmark)                 │
+│                                                                              │
+│   Per-run metrics              Comparison outputs                            │
+│   • retrieval_latency_ms       • compare_retrievers()  — all 4 strategies    │
+│   • generation_latency_ms      • compare_vector_stores() — FAISS vs Chroma   │
+│   • total_latency_ms                                                         │
+│   • num_chunks                 Ranking / summary                             │
+│   • avg_score                  • fastest_strategy                            │
+│   • unique_sources             • most_diverse_strategy                       │
+│   • answer_preview             • StrategyBenchmark rows (table/JSON)         │
+│                                                                              │
+│   Surfaces: Gradio Compare tabs · CLI compare-* · CI-friendly JSON summary   │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Project layout
