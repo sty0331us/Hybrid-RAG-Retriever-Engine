@@ -1,0 +1,11 @@
+# Default runtime profile (non-secret). Secrets stay in .env.
+llm_model: gpt-4o-mini
+embedding_model: text-embedding-3-small
+default_vector_store: faiss
+default_retriever: vector_store
+top_k: 4
+chunk_size: 500
+chunk_overlap: 100
+parent_chunk_size: 2000
+child_chunk_size: 400
+collection_name: hybrid_rag_docs

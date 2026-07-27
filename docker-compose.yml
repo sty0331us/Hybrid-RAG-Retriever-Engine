@@ -1,0 +1,12 @@
+services:
+  hybrid-rag:
+    build: .
+    ports:
+      - "7860:7860"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data:ro
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+    restart: unless-stopped

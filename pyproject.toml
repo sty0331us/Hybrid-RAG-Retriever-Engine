@@ -1,0 +1,89 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hybrid-rag-retriever-engine"
+version = "1.0.0"
+description = "Production-grade Hybrid RAG Retriever Engine with multi-strategy retrieval benchmarking"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Hybrid RAG Team" }]
+keywords = ["rag", "retrieval", "langchain", "faiss", "chroma", "llm"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "langchain>=0.3.14",
+  "langchain-classic>=1.0.0",
+  "langchain-community>=0.3.14",
+  "langchain-openai>=0.3.0",
+  "langchain-text-splitters>=0.3.4",
+  "langchain-chroma>=0.2.0",
+  "langchain-core>=0.3.0",
+  "faiss-cpu>=1.9.0",
+  "chromadb>=0.5.23",
+  "openai>=1.58.0",
+  "pydantic>=2.10.0",
+  "pydantic-settings>=2.7.0",
+  "python-dotenv>=1.0.1",
+  "gradio>=5.9.0",
+  "tiktoken>=0.8.0",
+  "pypdf>=5.1.0",
+  "tenacity>=9.0.0",
+  "structlog>=24.4.0",
+  "orjson>=3.10.12",
+  "httpx>=0.28.0",
+  "rich>=13.9.4",
+  "typer>=0.15.1",
+  "prometheus-client>=0.21.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.4",
+  "pytest-asyncio>=0.25.0",
+  "pytest-cov>=6.0.0",
+  "ruff>=0.8.4",
+  "mypy>=1.14.0",
+  "pre-commit>=4.0.1",
+]
+api = [
+  "fastapi>=0.115.6",
+  "uvicorn[standard]>=0.34.0",
+]
+
+[project.scripts]
+hybrid-rag = "hybrid_rag.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hybrid_rag"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/hybrid_rag" = "hybrid_rag"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N"]
+ignore = ["B008"]  # Typer/FastAPI Depends() defaults are intentional
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["hybrid_rag"]
+mypy_path = "src"

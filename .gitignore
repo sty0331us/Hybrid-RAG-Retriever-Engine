@@ -1,0 +1,47 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+env/
+
+# Secrets & local env
+.env
+.env.local
+*.pem
+credentials.json
+
+# Runtime artifacts
+logs/
+storage/faiss/*
+storage/chroma/*
+storage/docstore/*
+!storage/faiss/.gitkeep
+!storage/chroma/.gitkeep
+!storage/docstore/.gitkeep
+*.faiss
+*.pkl
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Gradio / notebooks
+.gradio/
+*.ipynb_checkpoints/
