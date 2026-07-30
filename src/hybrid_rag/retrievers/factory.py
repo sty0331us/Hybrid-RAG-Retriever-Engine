@@ -7,6 +7,7 @@ from langchain_core.language_models import BaseLanguageModel
 from hybrid_rag.config.settings import RetrieverStrategy, Settings
 from hybrid_rag.core.exceptions import ConfigurationError
 from hybrid_rag.retrievers.base import BaseStrategyRetriever
+from hybrid_rag.retrievers.ensemble import EnsembleHybridRetrieverStrategy
 from hybrid_rag.retrievers.multi_query import MultiQueryRetrieverStrategy
 from hybrid_rag.retrievers.parent_document import ParentDocumentRetrieverStrategy
 from hybrid_rag.retrievers.self_query import SelfQueryRetrieverStrategy
@@ -39,5 +40,8 @@ def create_retriever(
 
     if strategy_enum == RetrieverStrategy.PARENT_DOCUMENT:
         return ParentDocumentRetrieverStrategy(store, settings, top_k=top_k)
+
+    if strategy_enum == RetrieverStrategy.ENSEMBLE:
+        return EnsembleHybridRetrieverStrategy(store, top_k=top_k)
 
     raise ConfigurationError(f"Unsupported retriever strategy: {strategy}")

@@ -26,6 +26,7 @@ class RetrieverStrategy(StrEnum):
     MULTI_QUERY = "multi_query"
     SELF_QUERY = "self_query"
     PARENT_DOCUMENT = "parent_document"
+    ENSEMBLE = "ensemble"
 
 
 class Settings(BaseSettings):
