@@ -1,0 +1,25 @@
+[
+  {
+    "query": "What are trade-offs of parent document retrieval?",
+    "relevant_doc_ids": [
+      "data/sample/rag/advanced_retrievers_2024.md",
+      "data/sample/rag/production_rag_pipelines_2025.md"
+    ],
+    "notes": "Parent/child retrieval discussion"
+  },
+  {
+    "query": "Compare FAISS and Chroma for production RAG",
+    "relevant_doc_ids": [
+      "data/sample/vector_db/faiss_semantic_search_2023.md",
+      "data/sample/vector_db/chroma_overview_2024.md"
+    ],
+    "notes": "Vector store comparison"
+  },
+  {
+    "query": "Security guidance about prompt injection in RAG",
+    "relevant_doc_ids": [
+      "data/sample/security/rag_security_notes_2025.md"
+    ],
+    "notes": "Security-focused query"
+  }
+]

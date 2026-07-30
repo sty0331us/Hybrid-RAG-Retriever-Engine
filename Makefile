@@ -1,4 +1,4 @@
-.PHONY: install test lint ui ingest demo docker-up
+.PHONY: install test lint ui ingest demo serve docker-up
 
 install:
 	pip install -e ".[dev]"
@@ -17,6 +17,9 @@ ingest:
 
 demo:
 	bash scripts/demo_benchmark.sh
+
+serve:
+	hybrid-rag serve
 
 docker-up:
 	docker compose up --build

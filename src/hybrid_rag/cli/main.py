@@ -119,6 +119,33 @@ def compare_stores_cmd(
     console.print_json(json.dumps(summary, default=str))
 
 
+@app.command("eval-quality")
+def eval_quality_cmd(
+    golden: Path = typer.Argument(
+        Path("data/sample/golden_queries.json"),
+        exists=True,
+        help="JSON list of {query, relevant_doc_ids}",
+    ),
+    strategy: RetrieverStrategy = typer.Option(RetrieverStrategy.VECTOR_STORE),
+    backend: VectorStoreBackend = typer.Option(VectorStoreBackend.FAISS),
+    k: int = typer.Option(4, help="Cutoff for precision/recall@k"),
+) -> None:
+    """Score retrieval quality against a golden query set (precision@k / MRR)."""
+    _boot()
+    from hybrid_rag.evaluation.quality import GoldenQuery, evaluate_golden_set
+    from hybrid_rag.rag.pipeline import RAGEngine
+
+    payload = json.loads(golden.read_text(encoding="utf-8"))
+    queries = [GoldenQuery.model_validate(item) for item in payload]
+    engine = RAGEngine()
+    paired = []
+    for item in queries:
+        result = engine.retrieve(item.query, strategy=strategy, backend=backend)
+        paired.append((item, result))
+    summary = evaluate_golden_set(paired, k=k)
+    console.print_json(json.dumps(summary, default=str))
+
+
 @app.command("ui")
 def ui_cmd(
     host: str | None = typer.Option(None, help="Bind address"),
@@ -134,6 +161,34 @@ def ui_cmd(
     from hybrid_rag.ui.gradio_app import launch
 
     launch(settings)
+
+
+@app.command("serve")
+def serve_cmd(
+    host: str | None = typer.Option(None, help="API bind address"),
+    port: int | None = typer.Option(None, help="API bind port"),
+    reload: bool = typer.Option(False, help="Auto-reload on code changes"),
+) -> None:
+    """Launch the FastAPI REST service."""
+    _boot()
+    settings = get_settings()
+    bind_host = host or settings.api_host
+    bind_port = port or settings.api_port
+    try:
+        import uvicorn
+    except ImportError as exc:  # pragma: no cover
+        console.print("[red]Missing API dependencies.[/red] Install with: pip install -e '.[api]'")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[bold]Serving API[/bold] at http://{bind_host}:{bind_port}")
+    console.print("Docs: /docs  ·  Health: /health")
+    uvicorn.run(
+        "hybrid_rag.api.app:create_app",
+        host=bind_host,
+        port=bind_port,
+        reload=reload,
+        factory=True,
+    )
 
 
 @app.callback()

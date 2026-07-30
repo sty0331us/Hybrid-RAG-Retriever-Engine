@@ -16,6 +16,7 @@ from hybrid_rag.config.settings import (
     VectorStoreBackend,
     get_settings,
 )
+from hybrid_rag.core.cache import TTLCache
 from hybrid_rag.core.exceptions import RAGPipelineError, StoreError
 from hybrid_rag.core.logging import get_logger
 from hybrid_rag.core.types import RAGAnswer, RetrievalResult
@@ -44,6 +45,27 @@ class RAGEngine:
         self.ingestor = DocumentIngestor(self.settings)
         self.prompt = build_rag_prompt()
         self._stores: dict[str, BaseVectorStoreManager] = {}
+        self._retrieve_cache: TTLCache[RetrievalResult] = TTLCache(self.settings.cache_ttl_seconds)
+        self._ask_cache: TTLCache[RAGAnswer] = TTLCache(self.settings.cache_ttl_seconds)
+
+    def clear_caches(self) -> None:
+        self._retrieve_cache.clear()
+        self._ask_cache.clear()
+
+    def cache_stats(self) -> dict[str, Any]:
+        return {
+            "retrieve": self._retrieve_cache.stats(),
+            "ask": self._ask_cache.stats(),
+        }
+
+    @staticmethod
+    def _cache_key(
+        operation: str,
+        query: str,
+        strategy: str,
+        backend: str,
+    ) -> tuple[str, str, str, str]:
+        return (operation, query.strip().lower(), strategy, backend)
 
     def _store_key(self, backend: VectorStoreBackend | str, *, parent: bool = False) -> str:
         suffix = ":parent" if parent else ":flat"
@@ -135,6 +157,7 @@ class RAGEngine:
             }
             logger.info("index_ready", backend=str(backend), flat_chunks=len(chunks))
 
+        self.clear_caches()
         return payload
 
     def retrieve(
@@ -146,18 +169,47 @@ class RAGEngine:
     ) -> RetrievalResult:
         backend = backend or self.settings.default_vector_store
         strategy_enum = RetrieverStrategy(strategy) if isinstance(strategy, str) else strategy
+        cache_key = self._cache_key("retrieve", query, str(strategy_enum), str(backend))
+        cached = self._retrieve_cache.get(cache_key)
+        if cached is not None:
+            logger.info("retrieve_cache_hit", strategy=str(strategy_enum), backend=str(backend))
+            return cached
+
         use_parent = strategy_enum == RetrieverStrategy.PARENT_DOCUMENT
-        store = self.ensure_store_loaded(backend, parent=use_parent)
-        retriever = create_retriever(strategy_enum, store, self.settings, llm=self.llm)
-        result = retriever.retrieve(query)
-        logger.info(
-            "retrieve_done",
-            strategy=result.strategy,
-            backend=result.vector_store,
-            chunks=len(result.chunks),
-            latency_ms=round(result.latency_ms, 2),
-        )
-        return result
+        try:
+            store = self.ensure_store_loaded(backend, parent=use_parent)
+            retriever = create_retriever(strategy_enum, store, self.settings, llm=self.llm)
+            result = retriever.retrieve(query)
+            if self.settings.enable_metrics:
+                from hybrid_rag.observability.metrics import observe_retrieval
+
+                observe_retrieval(
+                    strategy=result.strategy,
+                    vector_store=result.vector_store,
+                    latency_ms=result.latency_ms,
+                    num_chunks=len(result.chunks),
+                )
+            logger.info(
+                "retrieve_done",
+                strategy=result.strategy,
+                backend=result.vector_store,
+                chunks=len(result.chunks),
+                latency_ms=round(result.latency_ms, 2),
+            )
+            self._retrieve_cache.set(cache_key, result)
+            return result
+        except Exception:
+            if self.settings.enable_metrics:
+                from hybrid_rag.observability.metrics import observe_retrieval
+
+                observe_retrieval(
+                    strategy=str(strategy_enum),
+                    vector_store=str(backend),
+                    latency_ms=0.0,
+                    num_chunks=0,
+                    status="error",
+                )
+            raise
 
     @retry(
         wait=wait_exponential(multiplier=1, min=1, max=8),
@@ -180,13 +232,19 @@ class RAGEngine:
         backend: VectorStoreBackend | str | None = None,
     ) -> RAGAnswer:
         backend = backend or self.settings.default_vector_store
+        strategy_key = str(strategy)
+        cache_key = self._cache_key("ask", query, strategy_key, str(backend))
+        cached = self._ask_cache.get(cache_key)
+        if cached is not None:
+            logger.info("ask_cache_hit", strategy=strategy_key, backend=str(backend))
+            return cached
         try:
             retrieval = self.retrieve(query, strategy=strategy, backend=backend)
             context = format_context(retrieval.chunks)
             gen_started = time.perf_counter()
             answer = self._generate(query, context)
             gen_ms = (time.perf_counter() - gen_started) * 1000
-            return RAGAnswer(
+            rag_answer = RAGAnswer(
                 query=query,
                 answer=answer,
                 strategy=retrieval.strategy,
@@ -197,7 +255,32 @@ class RAGEngine:
                 total_latency_ms=retrieval.latency_ms + gen_ms,
                 model=self.settings.llm_model,
             )
+            if self.settings.enable_metrics:
+                from hybrid_rag.observability.metrics import GENERATION_LATENCY, REQUESTS_TOTAL
+
+                GENERATION_LATENCY.labels(
+                    strategy=rag_answer.strategy,
+                    vector_store=rag_answer.vector_store,
+                    model=rag_answer.model,
+                ).observe(gen_ms / 1000.0)
+                REQUESTS_TOTAL.labels(
+                    operation="ask",
+                    strategy=rag_answer.strategy,
+                    vector_store=rag_answer.vector_store,
+                    status="ok",
+                ).inc()
+            self._ask_cache.set(cache_key, rag_answer)
+            return rag_answer
         except Exception as exc:  # noqa: BLE001
+            if self.settings.enable_metrics:
+                from hybrid_rag.observability.metrics import REQUESTS_TOTAL
+
+                REQUESTS_TOTAL.labels(
+                    operation="ask",
+                    strategy=str(strategy),
+                    vector_store=str(backend),
+                    status="error",
+                ).inc()
             raise RAGPipelineError(f"RAG ask failed: {exc}", details={"query": query}) from exc
 
     def compare_strategies(

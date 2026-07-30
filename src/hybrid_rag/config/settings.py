@@ -26,6 +26,7 @@ class RetrieverStrategy(StrEnum):
     MULTI_QUERY = "multi_query"
     SELF_QUERY = "self_query"
     PARENT_DOCUMENT = "parent_document"
+    ENSEMBLE = "ensemble"
 
 
 class Settings(BaseSettings):
@@ -73,6 +74,8 @@ class Settings(BaseSettings):
     gradio_server_name: str = "0.0.0.0"
     gradio_server_port: int = Field(default=7860, ge=1, le=65535)
     gradio_share: bool = False
+    api_host: str = "0.0.0.0"
+    api_port: int = Field(default=8000, ge=1, le=65535)
     cache_ttl_seconds: int = Field(default=300, ge=0)
 
     @model_validator(mode="after")

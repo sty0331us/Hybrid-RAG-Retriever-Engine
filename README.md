@@ -13,8 +13,10 @@ and recruiters can actually review.
 | Multi-query retrievers | LLM query expansion + result union |
 | Self-querying retrievers | NL → semantic query + metadata filters |
 | Parent document retrievers | Child-chunk match → parent-context return |
+| Hybrid dense + lexical | `EnsembleHybridRetrieverStrategy` with RRF fusion |
 | FAISS vs Chroma | Dedicated store managers + benchmark tab |
 | End-to-end RAG + Gradio UI | `RAGEngine` + operator console |
+| REST API + metrics | FastAPI `/ask` · Prometheus `/metrics` |
 
 ## Architecture
 
@@ -52,11 +54,11 @@ and recruiters can actually review.
 │  │  baseline / fast   │  │  ambiguous Qs      │  │  (category, year, …)  │  │
 │  └────────────────────┘  └────────────────────┘  └────────────────────────┘  │
 │                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │                        parent_document                                 │  │
-│  │   match small child chunks  →  return larger parent context            │  │
-│  │   best for long manuals / policies where local match needs surround    │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────┐  ┌──────────────────────────────────────┐  │
+│  │      parent_document         │  │             ensemble                 │  │
+│  │  match child → return parent │  │  dense + lexical RRF fusion          │  │
+│  │  long manuals / policies     │  │  keyword + semantic hybrid           │  │
+│  └──────────────────────────────┘  └──────────────────────────────────────┘  │
 └──────────────────────────────────────┬───────────────────────────────────────┘
                                        │ RetrievedChunk[]
                                        ▼
@@ -71,15 +73,16 @@ and recruiters can actually review.
 │                    Evaluation / Metrics (RetrieverBenchmark)                 │
 │                                                                              │
 │   Per-run metrics              Comparison outputs                            │
-│   • retrieval_latency_ms       • compare_retrievers()  — all 4 strategies    │
+│   • retrieval_latency_ms       • compare_retrievers()  — all strategies      │
 │   • generation_latency_ms      • compare_vector_stores() — FAISS vs Chroma   │
-│   • total_latency_ms                                                         │
-│   • num_chunks                 Ranking / summary                             │
-│   • avg_score                  • fastest_strategy                            │
-│   • unique_sources             • most_diverse_strategy                       │
-│   • answer_preview             • StrategyBenchmark rows (table/JSON)         │
+│   • total_latency_ms           • eval-quality — precision@k / recall@k / MRR │
+│   • num_chunks                                                               │
+│   • avg_score                  Ranking / summary                             │
+│   • unique_sources             • fastest_strategy                            │
+│   • answer_preview             • most_diverse_strategy                       │
+│                                • StrategyBenchmark rows (table/JSON)         │
 │                                                                              │
-│   Surfaces: Gradio Compare tabs · CLI compare-* · CI-friendly JSON summary   │
+│   Surfaces: Gradio · CLI · FastAPI /metrics · CI-friendly JSON summary       │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -87,16 +90,18 @@ and recruiters can actually review.
 
 ```
 src/hybrid_rag/
+  api/             # FastAPI REST service
   config/          # pydantic-settings
-  core/            # logging, exceptions, domain types
+  core/            # logging, exceptions, domain types, TTL cache
   ingestion/       # loaders + chunkers
   stores/          # FAISS & Chroma managers
-  retrievers/      # four strategy implementations
+  retrievers/      # strategy implementations (incl. ensemble hybrid)
   rag/             # LLM clients + pipeline façade
-  evaluation/      # latency / diversity benchmarks
+  evaluation/      # latency benchmarks + precision@k / MRR
+  observability/   # Prometheus metrics
   ui/              # Gradio console
   cli/             # Typer CLI
-data/sample/       # curated knowledge base (category + year metadata)
+data/sample/       # curated knowledge base + golden_queries.json
 tests/unit/        # no-network unit tests
 ```
 
@@ -124,6 +129,12 @@ hybrid-rag ask "What are the trade-offs of parent document retrieval?" \
   --strategy parent_document --backend faiss
 ```
 
+**Hybrid dense + lexical retrieval:**
+
+```bash
+hybrid-rag ask "FAISS similarity search trade-offs" --strategy ensemble
+```
+
 **Compare all retriever strategies:**
 
 ```bash
@@ -137,11 +148,28 @@ hybrid-rag compare-stores "How does metadata filtering help retrieval?" \
   --strategy self_query
 ```
 
+**Offline retrieval quality (precision@k / MRR):**
+
+```bash
+hybrid-rag eval-quality data/sample/golden_queries.json --strategy ensemble
+```
+
 **Launch Gradio UI:**
 
 ```bash
 hybrid-rag ui
 # open http://127.0.0.1:7860
+```
+
+**Launch FastAPI REST service:**
+
+```bash
+pip install -e ".[api]"   # if you only installed the base package
+hybrid-rag serve
+# docs: http://127.0.0.1:8000/docs
+# health: GET /health
+# ask: POST /ask
+# metrics: GET /metrics
 ```
 
 ## Docker
@@ -159,6 +187,7 @@ docker compose up --build
 | `multi_query` | Ambiguous / multi-angle questions | Extra LLM rewrites |
 | `self_query` | Filtered questions (`category`, `year`, …) | LLM parse + filter |
 | `parent_document` | Long docs needing surrounding context | Indexing complexity |
+| `ensemble` | Keyword + semantic hybrid queries | Slightly above vector |
 
 ### Example self-query prompts
 
@@ -174,10 +203,12 @@ OPENAI_API_KEY=sk-test pytest -q tests/unit
 ## Design choices (interview talking points)
 
 1. **Strategy pattern** — retrievers share one interface; swapping is a config change.
-2. **Isolated indexes** — flat chunks and parent/child indexes are separated per backend.
-3. **Measurable comparisons** — latency, chunk count, and source diversity are first-class.
-4. **Operational basics** — env-based secrets, structlog, retries, Docker, CI.
-5. **Grounded generation** — prompts enforce citation + refusal when context is weak.
+2. **True hybrid retrieval** — ensemble fuses dense + lexical rankings with RRF.
+3. **Isolated indexes** — flat chunks and parent/child indexes are separated per backend.
+4. **Measurable comparisons** — latency, diversity, and precision@k / MRR are first-class.
+5. **Operational basics** — env secrets, structlog, Prometheus, TTL cache, Docker, CI.
+6. **Multiple surfaces** — CLI, Gradio, and FastAPI for demos vs integration.
+7. **Grounded generation** — prompts enforce citation + refusal when context is weak.
 
 ## License
 

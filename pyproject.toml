@@ -52,6 +52,9 @@ dev = [
   "ruff>=0.8.4",
   "mypy>=1.14.0",
   "pre-commit>=4.0.1",
+  "fastapi>=0.115.6",
+  "uvicorn[standard]>=0.34.0",
+  "httpx>=0.28.0",
 ]
 api = [
   "fastapi>=0.115.6",

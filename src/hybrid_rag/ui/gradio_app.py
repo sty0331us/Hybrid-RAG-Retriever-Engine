@@ -73,8 +73,8 @@ def build_ui(engine: RAGEngine | None = None, settings: Settings | None = None) 
             """
 <div class="title">Hybrid RAG Retriever Engine</div>
 <div class="subtitle">
-Compare vector-store, multi-query, self-query, and parent-document retrievers
-across FAISS and Chroma — built for real workloads, not demos.
+Compare vector-store, multi-query, self-query, parent-document, and ensemble
+(hybrid dense+lexical RRF) retrievers across FAISS and Chroma.
 </div>
 """
         )
@@ -120,7 +120,7 @@ across FAISS and Chroma — built for real workloads, not demos.
 
         with gr.Tab("Compare Retrievers"):
             gr.Markdown(
-                "Runs **all four** retrieval strategies against the same query and vector backend, "
+                "Runs **all** retrieval strategies against the same query and vector backend, "
                 "then ranks by latency and source diversity."
             )
             cmp_query = gr.Textbox(label="Question", lines=2)
@@ -230,6 +230,7 @@ across FAISS and Chroma — built for real workloads, not demos.
 | **multi_query** | LLM expands query; unions hits | Ambiguous questions |
 | **self_query** | Semantic query + metadata filters | Constrained queries |
 | **parent_document** | Match children, return parents | Long-document context |
+| **ensemble** | Dense + lexical RRF fusion | Keyword + semantic mix |
 
 ## Vector stores
 
