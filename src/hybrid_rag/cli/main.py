@@ -136,6 +136,34 @@ def ui_cmd(
     launch(settings)
 
 
+@app.command("serve")
+def serve_cmd(
+    host: str | None = typer.Option(None, help="API bind address"),
+    port: int | None = typer.Option(None, help="API bind port"),
+    reload: bool = typer.Option(False, help="Auto-reload on code changes"),
+) -> None:
+    """Launch the FastAPI REST service."""
+    _boot()
+    settings = get_settings()
+    bind_host = host or settings.api_host
+    bind_port = port or settings.api_port
+    try:
+        import uvicorn
+    except ImportError as exc:  # pragma: no cover
+        console.print("[red]Missing API dependencies.[/red] Install with: pip install -e '.[api]'")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[bold]Serving API[/bold] at http://{bind_host}:{bind_port}")
+    console.print("Docs: /docs  ·  Health: /health")
+    uvicorn.run(
+        "hybrid_rag.api.app:create_app",
+        host=bind_host,
+        port=bind_port,
+        reload=reload,
+        factory=True,
+    )
+
+
 @app.callback()
 def main_callback() -> None:
     """Hybrid RAG Retriever Engine CLI."""
