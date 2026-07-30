@@ -86,3 +86,10 @@ def test_ingest_missing_source():
     client = _client()
     resp = client.post("/ingest", json={"source": "/tmp/does-not-exist-hybrid-rag"})
     assert resp.status_code == 404
+
+
+def test_metrics_endpoint_when_enabled():
+    client = _client()
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+    assert "text/plain" in resp.headers["content-type"]

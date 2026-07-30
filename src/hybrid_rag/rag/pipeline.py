@@ -147,17 +147,39 @@ class RAGEngine:
         backend = backend or self.settings.default_vector_store
         strategy_enum = RetrieverStrategy(strategy) if isinstance(strategy, str) else strategy
         use_parent = strategy_enum == RetrieverStrategy.PARENT_DOCUMENT
-        store = self.ensure_store_loaded(backend, parent=use_parent)
-        retriever = create_retriever(strategy_enum, store, self.settings, llm=self.llm)
-        result = retriever.retrieve(query)
-        logger.info(
-            "retrieve_done",
-            strategy=result.strategy,
-            backend=result.vector_store,
-            chunks=len(result.chunks),
-            latency_ms=round(result.latency_ms, 2),
-        )
-        return result
+        try:
+            store = self.ensure_store_loaded(backend, parent=use_parent)
+            retriever = create_retriever(strategy_enum, store, self.settings, llm=self.llm)
+            result = retriever.retrieve(query)
+            if self.settings.enable_metrics:
+                from hybrid_rag.observability.metrics import observe_retrieval
+
+                observe_retrieval(
+                    strategy=result.strategy,
+                    vector_store=result.vector_store,
+                    latency_ms=result.latency_ms,
+                    num_chunks=len(result.chunks),
+                )
+            logger.info(
+                "retrieve_done",
+                strategy=result.strategy,
+                backend=result.vector_store,
+                chunks=len(result.chunks),
+                latency_ms=round(result.latency_ms, 2),
+            )
+            return result
+        except Exception:
+            if self.settings.enable_metrics:
+                from hybrid_rag.observability.metrics import observe_retrieval
+
+                observe_retrieval(
+                    strategy=str(strategy_enum),
+                    vector_store=str(backend),
+                    latency_ms=0.0,
+                    num_chunks=0,
+                    status="error",
+                )
+            raise
 
     @retry(
         wait=wait_exponential(multiplier=1, min=1, max=8),
@@ -186,7 +208,7 @@ class RAGEngine:
             gen_started = time.perf_counter()
             answer = self._generate(query, context)
             gen_ms = (time.perf_counter() - gen_started) * 1000
-            return RAGAnswer(
+            rag_answer = RAGAnswer(
                 query=query,
                 answer=answer,
                 strategy=retrieval.strategy,
@@ -197,7 +219,31 @@ class RAGEngine:
                 total_latency_ms=retrieval.latency_ms + gen_ms,
                 model=self.settings.llm_model,
             )
+            if self.settings.enable_metrics:
+                from hybrid_rag.observability.metrics import GENERATION_LATENCY, REQUESTS_TOTAL
+
+                GENERATION_LATENCY.labels(
+                    strategy=rag_answer.strategy,
+                    vector_store=rag_answer.vector_store,
+                    model=rag_answer.model,
+                ).observe(gen_ms / 1000.0)
+                REQUESTS_TOTAL.labels(
+                    operation="ask",
+                    strategy=rag_answer.strategy,
+                    vector_store=rag_answer.vector_store,
+                    status="ok",
+                ).inc()
+            return rag_answer
         except Exception as exc:  # noqa: BLE001
+            if self.settings.enable_metrics:
+                from hybrid_rag.observability.metrics import REQUESTS_TOTAL
+
+                REQUESTS_TOTAL.labels(
+                    operation="ask",
+                    strategy=str(strategy),
+                    vector_store=str(backend),
+                    status="error",
+                ).inc()
             raise RAGPipelineError(f"RAG ask failed: {exc}", details={"query": query}) from exc
 
     def compare_strategies(

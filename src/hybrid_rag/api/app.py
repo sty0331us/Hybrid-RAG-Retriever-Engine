@@ -61,6 +61,16 @@ def create_app(
             vector_stores=[b.value for b in VectorStoreBackend],
         )
 
+    if settings.enable_metrics:
+
+        @app.get("/metrics", tags=["ops"])
+        def metrics():
+            from fastapi.responses import Response
+
+            from hybrid_rag.observability.metrics import metrics_payload
+
+            return Response(content=metrics_payload(), media_type="text/plain; version=0.0.4")
+
     @app.post("/ask", response_model=AskResponse, tags=["rag"])
     def ask(body: AskRequest, rag: RAGEngine = Depends(get_engine)) -> AskResponse:
         try:
