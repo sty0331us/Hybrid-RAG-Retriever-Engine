@@ -16,6 +16,7 @@ from hybrid_rag.config.settings import (
     VectorStoreBackend,
     get_settings,
 )
+from hybrid_rag.core.cache import TTLCache
 from hybrid_rag.core.exceptions import RAGPipelineError, StoreError
 from hybrid_rag.core.logging import get_logger
 from hybrid_rag.core.types import RAGAnswer, RetrievalResult
@@ -44,6 +45,27 @@ class RAGEngine:
         self.ingestor = DocumentIngestor(self.settings)
         self.prompt = build_rag_prompt()
         self._stores: dict[str, BaseVectorStoreManager] = {}
+        self._retrieve_cache: TTLCache[RetrievalResult] = TTLCache(self.settings.cache_ttl_seconds)
+        self._ask_cache: TTLCache[RAGAnswer] = TTLCache(self.settings.cache_ttl_seconds)
+
+    def clear_caches(self) -> None:
+        self._retrieve_cache.clear()
+        self._ask_cache.clear()
+
+    def cache_stats(self) -> dict[str, Any]:
+        return {
+            "retrieve": self._retrieve_cache.stats(),
+            "ask": self._ask_cache.stats(),
+        }
+
+    @staticmethod
+    def _cache_key(
+        operation: str,
+        query: str,
+        strategy: str,
+        backend: str,
+    ) -> tuple[str, str, str, str]:
+        return (operation, query.strip().lower(), strategy, backend)
 
     def _store_key(self, backend: VectorStoreBackend | str, *, parent: bool = False) -> str:
         suffix = ":parent" if parent else ":flat"
@@ -135,6 +157,7 @@ class RAGEngine:
             }
             logger.info("index_ready", backend=str(backend), flat_chunks=len(chunks))
 
+        self.clear_caches()
         return payload
 
     def retrieve(
@@ -146,6 +169,12 @@ class RAGEngine:
     ) -> RetrievalResult:
         backend = backend or self.settings.default_vector_store
         strategy_enum = RetrieverStrategy(strategy) if isinstance(strategy, str) else strategy
+        cache_key = self._cache_key("retrieve", query, str(strategy_enum), str(backend))
+        cached = self._retrieve_cache.get(cache_key)
+        if cached is not None:
+            logger.info("retrieve_cache_hit", strategy=str(strategy_enum), backend=str(backend))
+            return cached
+
         use_parent = strategy_enum == RetrieverStrategy.PARENT_DOCUMENT
         try:
             store = self.ensure_store_loaded(backend, parent=use_parent)
@@ -167,6 +196,7 @@ class RAGEngine:
                 chunks=len(result.chunks),
                 latency_ms=round(result.latency_ms, 2),
             )
+            self._retrieve_cache.set(cache_key, result)
             return result
         except Exception:
             if self.settings.enable_metrics:
@@ -202,6 +232,12 @@ class RAGEngine:
         backend: VectorStoreBackend | str | None = None,
     ) -> RAGAnswer:
         backend = backend or self.settings.default_vector_store
+        strategy_key = str(strategy)
+        cache_key = self._cache_key("ask", query, strategy_key, str(backend))
+        cached = self._ask_cache.get(cache_key)
+        if cached is not None:
+            logger.info("ask_cache_hit", strategy=strategy_key, backend=str(backend))
+            return cached
         try:
             retrieval = self.retrieve(query, strategy=strategy, backend=backend)
             context = format_context(retrieval.chunks)
@@ -233,6 +269,7 @@ class RAGEngine:
                     vector_store=rag_answer.vector_store,
                     status="ok",
                 ).inc()
+            self._ask_cache.set(cache_key, rag_answer)
             return rag_answer
         except Exception as exc:  # noqa: BLE001
             if self.settings.enable_metrics:
